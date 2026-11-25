@@ -1,0 +1,20 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex,nofollow"><link rel="canonical" href="https://gentoober.blogspot.com/2023/08/criando-um-swap-file-criptografado.html"><title>Encrypted swap-file | Gentoober</title><style>*{box-sizing:border-box}html{color-scheme:light dark;color:#eef2f8;background:#10151d;font:18px/1.65 system-ui,sans-serif}body{margin:0}header,main,footer{max-width:840px;margin:auto;padding:1rem 1.2rem}header{border-bottom:1px solid #394151;font-weight:700}a{color:#a8cdff;overflow-wrap:anywhere}h1{overflow-wrap:anywhere;font-size:clamp(1.75rem,5vw,3rem);line-height:1.14}h2,h3{line-height:1.25}.date,footer,small{color:#afbac9}li{margin:.6rem 0}pre{background:#1b2534;border:1px solid #394151;border-radius:.5rem;padding:.8rem;font-size:.85rem;overflow:auto}code{font-family:ui-monospace,monospace}img{max-width:100%;height:auto}footer{border-top:1px solid #394151;font-size:.85rem}blockquote{border-left:3px solid #a8cdff;margin-left:0;padding-left:1rem}
+</style></head><body><header><a href="/blog/">Gentoober / Acervo</a></header><main><article><p class="date"><time datetime="2023-08-25T07:52:00.013-07:00">2023-08-25</time> · <a href="https://gentoober.blogspot.com/2023/08/criando-um-swap-file-criptografado.html">Original no Blogger</a></p><h1>Encrypted swap-file</h1><p>Everyone swaps laptops eventually and forgets one detail: disk encryption doesn’t cover swap. You encrypt the whole root partition, sleep fine, then forget the kernel dumps memory pages into an unencrypted file the moment RAM gets tight. If someone grabs your disk after a hibernate, or even after a heavy session that forced swap, that data is sitting there, plain.</p>
+<p>Here’s how I closed that gap on my own [Gentoo] setup.</p>
+<p>Execute:</p>
+<p><strong>~ #</strong> dd bs=4M count=2560 if=/dev/zero of=swapfile conv=fsync oflag=direct status=progress &amp;&amp; chattr +C swapfile &amp;&amp; \
+lsattr swapfile &amp;&amp; chmod 0600 swapfile &amp;&amp; ls -l swapfile &amp;&amp; cryptsetup luksFormat swapfile</p>
+<p><strong>~ #</strong> cryptsetup luksOpen swapfile swap_crypt &amp;&amp; mkswap /dev/mapper/swap_crypt &amp;&amp; swapon /dev/mapper/swap_crypt</p>
+<p>How this command works:</p>
+<p>on systems with strong privacy requirements, running swap on disk without encryption is a real risk (RAM data exposed on hibernation or physical extraction).</p>
+<ol>
+<li><code>dd bs=4M count=2560 ...</code> → creates a 10GB file (block size × count = total size, adjust count for whatever size you need).</li>
+<li><code>chattr +C swapfile</code> → disables Copy-on-Write. this only does anything on Btrfs — on ext4 the command runs and silently does nothing, so check your filesystem first instead of trusting the flag blindly.</li>
+<li><code>chmod 0600</code> → strict permissions (<code>rw</code> for the owner only).</li>
+<li><code>cryptsetup luksFormat</code> → creates an encrypted LUKS container.</li>
+<li><code>cryptsetup luksOpen + mkswap + swapon</code> → opens it, formats it as swap, and activates it.</li>
+</ol>
+<p><strong>Advantages:</strong> protects in-memory data against cold boot attacks and disk forensics — anyone pulling the drive lands on ciphertext instead of raw pages.</p>
+<p><strong>Risks:</strong> performance overhead from encryption (more noticeable on spinning disks than SSDs) and extra complexity at boot.</p>
+<p><strong>To make it persistent:</strong> configure it in <code>/etc/crypttab</code> and <code>/etc/fstab</code> (Gentoo/OpenRC) or set up a systemd unit. either way, the LUKS container has to be open before <code>swapon</code> runs — that ordering is the part that actually breaks if you get it wrong.</p>
+</article></main><footer>Acervo técnico do Gentoober. Datas originais preservadas.</footer></body></html>

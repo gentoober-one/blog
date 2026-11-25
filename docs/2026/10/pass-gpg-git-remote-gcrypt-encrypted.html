@@ -1,0 +1,361 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex,nofollow"><link rel="canonical" href="https://gentoober.blogspot.com/2026/10/pass-gpg-git-remote-gcrypt-encrypted.html"><title>pass + GPG + git-remote-gcrypt: Encrypted Password Store Sync with GitHub | Gentoober</title><style>*{box-sizing:border-box}html{color-scheme:light dark;color:#eef2f8;background:#10151d;font:18px/1.65 system-ui,sans-serif}body{margin:0}header,main,footer{max-width:840px;margin:auto;padding:1rem 1.2rem}header{border-bottom:1px solid #394151;font-weight:700}a{color:#a8cdff;overflow-wrap:anywhere}h1{overflow-wrap:anywhere;font-size:clamp(1.75rem,5vw,3rem);line-height:1.14}h2,h3{line-height:1.25}.date,footer,small{color:#afbac9}li{margin:.6rem 0}pre{background:#1b2534;border:1px solid #394151;border-radius:.5rem;padding:.8rem;font-size:.85rem;overflow:auto}code{font-family:ui-monospace,monospace}img{max-width:100%;height:auto}footer{border-top:1px solid #394151;font-size:.85rem}blockquote{border-left:3px solid #a8cdff;margin-left:0;padding-left:1rem}
+</style></head><body><header><a href="/blog/">Gentoober / Acervo</a></header><main><article><p class="date"><time datetime="2026-10-31T19:11:16.522-07:00">2026-10-31</time> · <a href="https://gentoober.blogspot.com/2026/10/pass-gpg-git-remote-gcrypt-encrypted.html">Original no Blogger</a></p><h1>pass + GPG + git-remote-gcrypt: Encrypted Password Store Sync with GitHub</h1><p>The idea was simple: keep my passwords in the terminal with <code>pass</code>, version the encrypted files with Git, and maintain an encrypted backup on GitHub. The interesting part is that storing <code>.gpg</code> files in a Git repository is not quite the same as encrypting the entire repository.</p>
+<p>I wanted both: individual passwords encrypted locally with GPG, and a remote Git repository encrypted again before anything is uploaded. The final setup uses <strong>pass + GnuPG + Git + git-remote-gcrypt + SSH</strong>.</p>
+<p>This write-up covers the installation from scratch, synchronization, restoration on another machine, and the GPG/WSL problems I encountered along the way.</p>
+<p><strong>Environment:</strong> GNU/Linux (Ubuntu/WSL2)<br>
+<strong>Password manager:</strong> pass<br>
+<strong>Local encryption:</strong> GnuPG<br>
+<strong>Version control:</strong> Git<br>
+<strong>Remote encryption:</strong> git-remote-gcrypt<br>
+<strong>Transport:</strong> OpenSSH<br>
+<strong>Remote:</strong> GitHub</p>
+<h3 id="1-how-the-whole-thing-works">1. How the whole thing works</h3>
+<p>There are two separate encryption layers.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>                +-------------------------+</span></span>
+<span class="line"><span>                |       pass CLI          |</span></span>
+<span class="line"><span>                |  generate/show/insert   |</span></span>
+<span class="line"><span>                +------------+------------+</span></span>
+<span class="line"><span>                             |</span></span>
+<span class="line"><span>                             v</span></span>
+<span class="line"><span>                +-------------------------+</span></span>
+<span class="line"><span>                |       GnuPG             |</span></span>
+<span class="line"><span>                |  Encrypt each password  |</span></span>
+<span class="line"><span>                +------------+------------+</span></span>
+<span class="line"><span>                             |</span></span>
+<span class="line"><span>                             v</span></span>
+<span class="line"><span>                +-------------------------+</span></span>
+<span class="line"><span>                |  ~/.password-store      |</span></span>
+<span class="line"><span>                |  *.gpg + Git history    |</span></span>
+<span class="line"><span>                +------------+------------+</span></span>
+<span class="line"><span>                             |</span></span>
+<span class="line"><span>                             v</span></span>
+<span class="line"><span>                +-------------------------+</span></span>
+<span class="line"><span>                |   git-remote-gcrypt     |</span></span>
+<span class="line"><span>                |  Encrypt Git objects    |</span></span>
+<span class="line"><span>                +------------+------------+</span></span>
+<span class="line"><span>                             |</span></span>
+<span class="line"><span>                             v</span></span>
+<span class="line"><span>                +-------------------------+</span></span>
+<span class="line"><span>                |    SSH transport        |</span></span>
+<span class="line"><span>                |        GitHub           |</span></span>
+<span class="line"><span>                +-------------------------+</span></span></code></pre>
+<p><code>pass</code> encrypts individual password entries. Git tracks changes. <code>git-remote-gcrypt</code> encrypts the repository representation stored on GitHub.</p>
+<p>SSH handles authentication and transport. It does not replace GPG encryption, and a normal Git push of encrypted password files does not automatically encrypt the rest of the Git history.</p>
+<h3 id="2-installing-the-dependencies">2. Installing the dependencies</h3>
+<p>On Ubuntu or Debian:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>sudo apt update</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>sudo apt install -y \</span></span>
+<span class="line"><span>    pass \</span></span>
+<span class="line"><span>    gnupg \</span></span>
+<span class="line"><span>    git \</span></span>
+<span class="line"><span>    git-remote-gcrypt \</span></span>
+<span class="line"><span>    openssh-client \</span></span>
+<span class="line"><span>    pinentry-curses</span></span></code></pre>
+<p>Check the binaries:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>pass version</span></span>
+<span class="line"><span>gpg --version</span></span>
+<span class="line"><span>git --version</span></span>
+<span class="line"><span>command -v git-remote-gcrypt</span></span>
+<span class="line"><span>command -v pinentry-curses</span></span></code></pre>
+<p>For Gentoo, the installation process is different, but the architecture is exactly the same: install the corresponding packages using Portage.</p>
+<h3 id="3-creating-or-selecting-a-gpg-key">3. Creating or selecting a GPG key</h3>
+<p>If you already have a GPG key, do not generate another one just for this tutorial. List your existing keys:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>gpg --list-secret-keys \</span></span>
+<span class="line"><span>    --keyid-format LONG \</span></span>
+<span class="line"><span>    --fingerprint</span></span></code></pre>
+<p>A key listing normally contains a primary key, its fingerprint, a user ID, and a subkey capable of encryption.</p>
+<p>If you do not have a key, generate one:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>gpg --full-generate-key</span></span></code></pre>
+<p>Choose a suitable supported algorithm, specify your identity and protect the private key with a strong passphrase.</p>
+<p>The primary fingerprint identifies the key that will be used for the password store and the encrypted remote.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>gpg --list-secret-keys \</span></span>
+<span class="line"><span>    --with-subkey-fingerprint</span></span></code></pre>
+<p>For the remaining commands, replace <code>SEU_FINGERPRINT_GPG</code> with your real fingerprint.</p>
+<h3 id="4-initializing-pass">4. Initializing pass</h3>
+<p>A new password store can be initialized with:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>fingerprint_gpg="SEU_FINGERPRINT_GPG"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>pass init "$fingerprint_gpg"</span></span></code></pre>
+<p>The default directory is:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>~/.password-store/</span></span></code></pre>
+<p>The <code>.gpg-id</code> file records which GPG recipient is authorized to encrypt passwords.</p>
+<p>Now create a test entry:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>pass generate laboratorio/conta-teste 20</span></span></code></pre>
+<p>Read it:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>pass show laboratorio/conta-teste</span></span></code></pre>
+<p>Or copy it to the clipboard, if clipboard support is available:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>pass -c laboratorio/conta-teste</span></span></code></pre>
+<p>The password store now contains a GPG-encrypted file. No plaintext password needs to be committed to Git.</p>
+<h3 id="5-preparing-git">5. Preparing Git</h3>
+<p>Configure the Git identity, if you have not done so:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>git config --global user.name "Seu Nome"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git config --global user.email \</span></span>
+<span class="line"><span>    "seu-email@example.com"</span></span></code></pre>
+<p>Initialize Git integration inside the password store:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>pass git init</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>cd ~/.password-store</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git branch -M main</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git status -sb</span></span></code></pre>
+<p>The <code>pass git</code> command operates on the repository associated with the password store.</p>
+<p>When Git integration is enabled, commands such as <code>pass generate</code>, <code>pass insert</code> and <code>pass rm</code> can record changes automatically.</p>
+<p>If you already have a Git repository with an established history, do not blindly reinitialize it or overwrite its remote.</p>
+<h3 id="6-configuring-github-ssh-authentication">6. Configuring GitHub SSH authentication</h3>
+<p>Check whether you already have a working SSH key:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>ls -la ~/.ssh</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>ssh -T git@github.com</span></span></code></pre>
+<p>If no suitable key exists, generate a dedicated Ed25519 key:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>ssh-keygen -t ed25519 \</span></span>
+<span class="line"><span>    -f ~/.ssh/id_ed25519_pass_backup \</span></span>
+<span class="line"><span>    -C "pass-backup"</span></span></code></pre>
+<p>Add its public key to your GitHub account under <strong>Settings / SSH and GPG keys</strong>.</p>
+<p>Only upload the public key:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>cat ~/.ssh/id_ed25519_pass_backup.pub</span></span></code></pre>
+<p>Never upload the private key.</p>
+<p>If you created the dedicated key, configure SSH to select it:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>nano ~/.ssh/config</span></span></code></pre>
+<p>Add a GitHub host entry:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>Host github.com</span></span>
+<span class="line"><span>    HostName github.com</span></span>
+<span class="line"><span>    User git</span></span>
+<span class="line"><span>    IdentityFile ~/.ssh/id_ed25519_pass_backup</span></span>
+<span class="line"><span>    IdentitiesOnly yes</span></span></code></pre>
+<p>Preserve any existing SSH configuration and adjust the host entry if you already use multiple GitHub identities.</p>
+<p>Then:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>chmod 600 ~/.ssh/config</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>ssh -T git@github.com</span></span></code></pre>
+<p>On the first connection, verify the GitHub host-key fingerprint against the official GitHub documentation before accepting it.</p>
+<h3 id="7-creating-an-empty-github-repository">7. Creating an empty GitHub repository</h3>
+<p>Create a new private repository named, for example:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>password-store-backup</span></span></code></pre>
+<p>Do not initialize it with a README, license or .gitignore. An empty repository simplifies the first encrypted push.</p>
+<p>A private repository is useful as an additional access-control layer, but privacy settings are not the encryption mechanism used in this setup.</p>
+<h3 id="8-configuring-git-remote-gcrypt">8. Configuring git-remote-gcrypt</h3>
+<p>This is the part that distinguishes the setup from simply pushing <code>.gpg</code> files to GitHub.</p>
+<p>Inside the password store:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>cd ~/.password-store</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>usuario_github="SEU_USUARIO_GITHUB"</span></span>
+<span class="line"><span>repositorio_github="password-store-backup"</span></span>
+<span class="line"><span>fingerprint_gpg="SEU_FINGERPRINT_GPG"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git remote add origin \</span></span>
+<span class="line"><span>    "gcrypt::git@github.com:${usuario_github}/${repositorio_github}.git"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git config remote.origin.gcrypt-participants \</span></span>
+<span class="line"><span>    "$fingerprint_gpg"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git config remote.origin.gcrypt-publish-participants \</span></span>
+<span class="line"><span>    false</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git config gcrypt.require-explicit-force-push \</span></span>
+<span class="line"><span>    true</span></span></code></pre>
+<p>The <code>gcrypt::</code> prefix tells Git to use the <code>git-remote-gcrypt</code> transport helper.</p>
+<p>The participants setting identifies which GPG keys are allowed to read and authenticate the encrypted repository.</p>
+<p>Publishing participant identities is disabled here to avoid unnecessarily exposing recipient key identifiers.</p>
+<p>The final setting requires an explicit force push. There is a reason for this, explained below.</p>
+<h3 id="9-first-encrypted-push">9. First encrypted push</h3>
+<p>For a newly created, empty GitHub repository:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>cd ~/.password-store</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git status -sb</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git log -3 --oneline</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git push --force -u origin main</span></span></code></pre>
+<p><strong>Important:</strong> this first push assumes the remote repository is empty and belongs exclusively to this password store. Do not reuse this command blindly against an existing repository.</p>
+<p>During the upload, git-remote-gcrypt encrypts the repository objects and creates a signed, encrypted remote manifest.</p>
+<p>A successful execution should include messages similar to:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>gcrypt: Encrypting to: ...</span></span>
+<span class="line"><span>gcrypt: Requesting manifest signature</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>To github.com:USER/password-store-backup.git</span></span>
+<span class="line"><span> * [new branch] main -&gt; main</span></span></code></pre>
+<p>At this point, GitHub stores the encrypted representation of the Git repository, rather than an ordinary readable Git history.</p>
+<h3 id="10-synchronizing-new-passwords">10. Synchronizing new passwords</h3>
+<p>Generate another test password:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>pass generate -c laboratorio/segunda-conta 24</span></span></code></pre>
+<p>With Git integration enabled, <code>pass</code> records the encrypted file in the local repository.</p>
+<p>But a successful local commit does not prove that the GitHub backup has been updated.</p>
+<p>Always distinguish these states:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>GPG encryption       -&gt; Local password protected</span></span>
+<span class="line"><span>Git commit           -&gt; Local history updated</span></span>
+<span class="line"><span>gcrypt push          -&gt; Remote backup updated</span></span>
+<span class="line"><span>gcrypt fetch         -&gt; Remote history verified</span></span></code></pre>
+<p>For subsequent synchronization, first fetch the remote:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>cd ~/.password-store</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git fetch origin main</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git status -sb</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git log --oneline origin/main..main</span></span></code></pre>
+<p>Check that the remote branch is an ancestor of the local branch:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>git merge-base --is-ancestor origin/main main \</span></span>
+<span class="line"><span>    &amp;&amp; echo "Historico compativel" \</span></span>
+<span class="line"><span>    || echo "Historico divergente"</span></span></code></pre>
+<p>If the history is compatible, the remote has not changed concurrently, and you are certain no other client is writing to the same repository, the explicit push is:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>git push --force origin main</span></span></code></pre>
+<p>Finally, fetch again and verify:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>git fetch origin main</span></span>
+<span class="line"><span>git status -sb</span></span></code></pre>
+<p>When both branches are synchronized:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>## main...origin/main</span></span></code></pre>
+<p>About force push:</p>
+<p>git-remote-gcrypt has a known limitation: its push implementation effectively behaves like a forced update. Requiring <code>--force</code> makes that behavior explicit but does not make concurrent writes safe. A fetch followed by an ancestry check still has a race window. For this reason, avoid simultaneous pushes from multiple devices and reconcile divergent histories before publishing.</p>
+<h3 id="11-the-wsl--gpg-agent-problem">11. The WSL / gpg-agent problem</h3>
+<p>One problem I ran into was intermittent failure to decrypt the remote manifest.</p>
+<p>The error looked like this:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>gcrypt: Decrypting manifest</span></span>
+<span class="line"><span>gpg: public key decryption failed: No such file or directory</span></span>
+<span class="line"><span>gpg: decryption failed: No such file or directory</span></span>
+<span class="line"><span>gcrypt: Failed to decrypt manifest!</span></span></code></pre>
+<p>The interesting part was that the same GPG key could encrypt and decrypt local files. The secret keys were present, and the GPG agent was running.</p>
+<p>So the first thing to check is not whether the key exists, but whether the key actually works:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>gpg --list-secret-keys \</span></span>
+<span class="line"><span>    --with-keygrip</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>export GPG_TTY="$(tty)"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>gpg-connect-agent updatestartuptty /bye</span></span></code></pre>
+<p>A simple round-trip test:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>fingerprint_gpg="SEU_FINGERPRINT_GPG"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>printf 'teste de criptografia\n' |</span></span>
+<span class="line"><span>    gpg --encrypt \</span></span>
+<span class="line"><span>        --trust-model always \</span></span>
+<span class="line"><span>        --recipient "$fingerprint_gpg" |</span></span>
+<span class="line"><span>    gpg --decrypt</span></span></code></pre>
+<p>If the plaintext comes back, local encryption and decryption are working.</p>
+<p>In my WSL environment, the runtime directory reported by the shell differed from the directory containing the actual GPG agent socket:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>GPG agent socket:</span></span>
+<span class="line"><span>/run/user/1000/gnupg/S.gpg-agent</span></span></code></pre>
+<p>Running the remote operation with the Linux user runtime made the manifest decrypt successfully:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>cd ~/.password-store</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>XDG_RUNTIME_DIR="/run/user/$(id -u)" \</span></span>
+<span class="line"><span>    git ls-remote origin refs/heads/main</span></span></code></pre>
+<p>That was a successful diagnostic workaround in this environment, not a universal fix for every GPG error.</p>
+<p>I would not globally overwrite <code>XDG_RUNTIME_DIR</code> in <code>~/.bashrc</code> just to accommodate gcrypt. WSLg also uses its runtime directory for graphical integration.</p>
+<p>If this specific workaround is necessary, apply it only to the Git commands involving gcrypt.</p>
+<h3 id="12-configuring-pinentry-curses">12. Configuring pinentry-curses</h3>
+<p>For terminal-based GPG authentication, configure <code>pinentry-curses</code>:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>mkdir -p ~/.gnupg</span></span>
+<span class="line"><span>chmod 700 ~/.gnupg</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>nano ~/.gnupg/gpg-agent.conf</span></span></code></pre>
+<p>Add or update the pinentry setting, avoiding duplicate <code>pinentry-program</code> directives:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>pinentry-program /usr/bin/pinentry-curses</span></span>
+<span class="line"><span>default-cache-ttl 28800</span></span>
+<span class="line"><span>max-cache-ttl 86400</span></span></code></pre>
+<p>Restart the agent:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>chmod 600 ~/.gnupg/gpg-agent.conf</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>gpgconf --kill gpg-agent</span></span>
+<span class="line"><span>gpgconf --launch gpg-agent</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>export GPG_TTY="$(tty)"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>gpg-connect-agent updatestartuptty /bye</span></span></code></pre>
+<p>These cache values determine how long the agent may retain authentication material. Shorter values reduce exposure on shared or unattended machines.</p>
+<h3 id="13-do-not-blindly-trust-automatic-hooks">13. Do not blindly trust automatic hooks</h3>
+<p>I initially experimented with a Git post-commit hook to synchronize every password change automatically.</p>
+<p>The problem is that a failed post-commit hook does not reverse the commit that already happened.</p>
+<p>That means the terminal can display a successful password generation and local commit even though the remote sync failed.</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>[main abc1234] Add generated password</span></span>
+<span class="line"><span>gcrypt: Failed to decrypt manifest!</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>Local commit: yes</span></span>
+<span class="line"><span>Remote synchronization: no</span></span></code></pre>
+<p>For a password backup, silently assuming that the remote is synchronized is worse than requiring one extra command.</p>
+<p>My preference is to keep the Git commit automatic but make the remote synchronization a separate, explicitly verified operation. If a hook is used, it must clearly report failures, retain pending commits and avoid unattended force pushes.</p>
+<h3 id="14-restoring-the-password-store-on-another-machine">14. Restoring the password store on another machine</h3>
+<p>The most important requirement is not the GitHub account. It is access to the correct GPG private key.</p>
+<p>On the new Linux machine, install the same tools:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>sudo apt install -y \</span></span>
+<span class="line"><span>    pass \</span></span>
+<span class="line"><span>    gnupg \</span></span>
+<span class="line"><span>    git \</span></span>
+<span class="line"><span>    git-remote-gcrypt \</span></span>
+<span class="line"><span>    openssh-client</span></span></code></pre>
+<p>Restore your GPG private key from a secure backup and configure GitHub SSH authentication.</p>
+<p>Then clone the encrypted repository:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>usuario_github="SEU_USUARIO_GITHUB"</span></span>
+<span class="line"><span>repositorio_github="password-store-backup"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git clone \</span></span>
+<span class="line"><span>    "gcrypt::git@github.com:${usuario_github}/${repositorio_github}.git" \</span></span>
+<span class="line"><span>    "$HOME/.password-store"</span></span></code></pre>
+<p>The clone operation requires access to the corresponding GPG private key to decrypt the remote.</p>
+<p>The restored <code>.gpg-id</code> file should already identify the intended GPG recipients. Do not unnecessarily reinitialize the store, because changing recipients can trigger reencryption of its entries.</p>
+<p>Validate:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>pass ls</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>git -C ~/.password-store status -sb</span></span></code></pre>
+<p>At this point the encrypted entries should be available, provided the correct private key was imported.</p>
+<h3 id="15-backing-up-the-private-key">15. Backing up the private key</h3>
+<p>The GitHub repository is not a substitute for a GPG key backup. Losing the private key can make the encrypted repository permanently unreadable.</p>
+<p>Store a protected backup outside GitHub and outside the password-store repository, preferably on encrypted offline media.</p>
+<p>For example, export the key into a directory on removable encrypted storage:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>fingerprint_gpg="SEU_FINGERPRINT_GPG"</span></span>
+<span class="line"><span>diretorio_backup="/CAMINHO/DO/ARMAZENAMENTO-SEGURO"</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>umask 077</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>gpg --export-secret-keys \</span></span>
+<span class="line"><span>    --output "$diretorio_backup/chave-privada.gpg" \</span></span>
+<span class="line"><span>    "$fingerprint_gpg"</span></span></code></pre>
+<p>Only run this after replacing the backup path with an actual secure destination. Protect the exported file, keep an independent recovery copy and test restoration in a controlled environment.</p>
+<p>Never commit exported secret keys to Git.</p>
+<h3 id="16-security-considerations">16. Security considerations</h3>
+<p>This setup protects the confidentiality of password entries and the repository contents stored remotely, but it does not solve every threat.</p>
+<ul>
+<li>Compromise of the unlocked local machine can expose passwords.</li>
+<li>A stolen GPG private key plus its passphrase can expose the backup.</li>
+<li>Clipboard contents may be accessible to other local processes.</li>
+<li>SSH authentication and GitHub permissions still matter.</li>
+<li>Forced pushes can overwrite concurrent updates.</li>
+<li>Remote deletion or account loss still requires independent backups.</li>
+<li>GPG agent caching is a convenience/security trade-off.</li>
+</ul>
+<p>Encrypted synchronization is not the same thing as complete endpoint security, and an encrypted GitHub repository is not a complete disaster-recovery strategy.</p>
+<h3 id="17-final-verification">17. Final verification</h3>
+<p>A few commands are enough to verify the most important components:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>echo "=== GPG ==="</span></span>
+<span class="line"><span>gpg --list-secret-keys</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>echo "=== SSH ==="</span></span>
+<span class="line"><span>ssh -T git@github.com</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>echo "=== PASSWORD STORE ==="</span></span>
+<span class="line"><span>pass ls</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>echo "=== GIT STATUS ==="</span></span>
+<span class="line"><span>git -C ~/.password-store status -sb</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>echo "=== REMOTE ==="</span></span>
+<span class="line"><span>git -C ~/.password-store \</span></span>
+<span class="line"><span>    ls-remote origin refs/heads/main</span></span></code></pre>
+<p>A valid remote branch and a clean synchronized Git status indicate that the encrypted remote is readable and the local branch is aligned with its remote-tracking reference.</p>
+<p>If remote decryption fails, investigate that error before generating more commits or attempting a force push.</p>
+<h3 id="conclusion">Conclusion</h3>
+<p>The final result is a terminal-based password manager with encrypted local entries, Git versioning, SSH authentication and an additional encryption layer for the remote repository.</p>
+<p>What I like about this setup is that GitHub does not need to be trusted with the plaintext repository contents. The keys remain under my control, and the repository can be restored on another machine without depending on a proprietary password-manager backend.</p>
+<p>What still matters is operational discipline: verify synchronization, maintain backups of the private keys, and avoid pretending that an automatic Git hook guarantees a successful remote upload.</p>
+<p>The useful lesson wasn’t just getting <code>pass</code> to work with GitHub. It was separating the different failure domains: GPG encryption, local Git history, SSH transport and encrypted remote synchronization.</p>
+<hr>
+<p><strong>References:</strong><br>
+<a href="https://www.passwordstore.org/">passwordstore.org</a><br>
+<a href="https://gnupg.org/">GnuPG</a><br>
+<a href="https://git-scm.com/docs">Git Documentation</a><br>
+<a href="https://github.com/spwhitton/git-remote-gcrypt">git-remote-gcrypt</a><br>
+<a href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh">GitHub SSH Authentication</a></p>
+</article></main><footer>Acervo técnico do Gentoober. Datas originais preservadas.</footer></body></html>

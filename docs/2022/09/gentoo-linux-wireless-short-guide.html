@@ -1,0 +1,21 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex,nofollow"><link rel="canonical" href="https://gentoober.blogspot.com/2022/09/gentoo-linux-wireless-short-guide.html"><title>[Gentoo Linux] Wireless connection | Gentoober</title><style>*{box-sizing:border-box}html{color-scheme:light dark;color:#eef2f8;background:#10151d;font:18px/1.65 system-ui,sans-serif}body{margin:0}header,main,footer{max-width:840px;margin:auto;padding:1rem 1.2rem}header{border-bottom:1px solid #394151;font-weight:700}a{color:#a8cdff;overflow-wrap:anywhere}h1{overflow-wrap:anywhere;font-size:clamp(1.75rem,5vw,3rem);line-height:1.14}h2,h3{line-height:1.25}.date,footer,small{color:#afbac9}li{margin:.6rem 0}pre{background:#1b2534;border:1px solid #394151;border-radius:.5rem;padding:.8rem;font-size:.85rem;overflow:auto}code{font-family:ui-monospace,monospace}img{max-width:100%;height:auto}footer{border-top:1px solid #394151;font-size:.85rem}blockquote{border-left:3px solid #a8cdff;margin-left:0;padding-left:1rem}
+</style></head><body><header><a href="/blog/">Gentoober / Acervo</a></header><main><article><p class="date"><time datetime="2022-09-04T17:59:00.016-07:00">2022-09-04</time> · <a href="https://gentoober.blogspot.com/2022/09/gentoo-linux-wireless-short-guide.html">Original no Blogger</a></p><h1>[Gentoo Linux] Wireless connection</h1><p>Quick reference for getting Wi-Fi up on Gentoo without NetworkManager in the picture — useful for headless boxes, minimal installs, or anywhere you just want <code>wpa_supplicant</code> talking directly to the interface.</p>
+<p>Execute:</p>
+<p><strong>~ #</strong> rfkill list
+<strong>~ #</strong> rfkill unblock N</p>
+<p><strong>~ #</strong> cd /etc/wpa_supplicant
+<strong>~ #</strong> nano wpa_supplicant.conf</p>
+<p><strong>~ #</strong> wpa_passphrase ESSID password &gt;&gt; /etc/wpa_supplicant/wpa_supplicant.conf</p>
+<p><strong>~ #</strong> rc-service wpa_supplicant start</p>
+<p>How this works:</p>
+<ol>
+<li><code>rfkill list</code> → check for blocked interfaces <strong>before</strong> doing anything else. <code>rfkill unblock N</code> (N = the interface number rfkill reported) clears a soft block, which is the reason a perfectly good card sometimes just won’t associate.</li>
+<li>create <code>wpa_supplicant.conf</code> with:<br>
+<code>ctrl_interface=/run/wpa_supplicant</code><br>
+<code>update_config=1</code></li>
+<li><code>wpa_passphrase</code> appends two lines to the file: a commented-out <code>#psk=password</code> line with your password in plain text, and the real <code>psk=</code> line with the computed hash. delete the commented plain-text line and leave the hash — that’s the one wpa_supplicant actually uses. deleting the wrong one breaks the connection, so double-check before saving.</li>
+<li><code>rc-service wpa_supplicant start</code> → brings the connection up under OpenRC.</li>
+</ol>
+<p>if it doesn’t associate after this, check <code>dmesg</code> for driver or firmware errors before touching the config again — half the “wpa_supplicant won’t connect” cases on Gentoo are actually missing firmware, not a config problem.</p>
+<p>this whole flow assumes you’re managing the interface directly. if you’d rather not deal with <code>wpa_supplicant.conf</code> by hand, NetworkManager or iwd cover the same ground with less manual editing — worth it for a laptop that hops networks, less worth it for a box that connects to one AP and stays there.</p>
+</article></main><footer>Acervo técnico do Gentoober. Datas originais preservadas.</footer></body></html>

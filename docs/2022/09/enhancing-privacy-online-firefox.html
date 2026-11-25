@@ -1,0 +1,48 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex,nofollow"><link rel="canonical" href="https://gentoober.blogspot.com/2022/09/enhancing-privacy-online-firefox.html"><title>[FIREFOX] ENHANCING PRIVACY ONLINE | Gentoober</title><style>*{box-sizing:border-box}html{color-scheme:light dark;color:#eef2f8;background:#10151d;font:18px/1.65 system-ui,sans-serif}body{margin:0}header,main,footer{max-width:840px;margin:auto;padding:1rem 1.2rem}header{border-bottom:1px solid #394151;font-weight:700}a{color:#a8cdff;overflow-wrap:anywhere}h1{overflow-wrap:anywhere;font-size:clamp(1.75rem,5vw,3rem);line-height:1.14}h2,h3{line-height:1.25}.date,footer,small{color:#afbac9}li{margin:.6rem 0}pre{background:#1b2534;border:1px solid #394151;border-radius:.5rem;padding:.8rem;font-size:.85rem;overflow:auto}code{font-family:ui-monospace,monospace}img{max-width:100%;height:auto}footer{border-top:1px solid #394151;font-size:.85rem}blockquote{border-left:3px solid #a8cdff;margin-left:0;padding-left:1rem}
+</style></head><body><header><a href="/blog/">Gentoober / Acervo</a></header><main><article><p class="date"><time datetime="2022-09-13T11:20:00.010-07:00">2022-09-13</time> · <a href="https://gentoober.blogspot.com/2022/09/enhancing-privacy-online-firefox.html">Original no Blogger</a></p><h1>[FIREFOX] ENHANCING PRIVACY ONLINE</h1><p>this is a set of <code>about:config</code> tweaks for people who want to reduce tracking and fingerprinting in Firefox and are okay trading some convenience for it. it’s not a “flip everything blindly” list — a few of these have a real cost in speed or in sites breaking, so read what each one does before you touch it. if you just want baseline privacy without breaking things, stick to the WebRTC, fingerprinting resistance, and telemetry entries below and skip the rest.</p>
+<p><strong>how to open about:config:</strong></p>
+<p>type <code>about:config</code> in the address bar and hit enter. Firefox shows a warning screen (“This might void your warranty!”) — click <strong>Accept the Risk and Continue</strong>. you’ll land on a search bar: paste in the preference name from each item below, and it’ll filter to that single line. for a <code>true</code>/<code>false</code> value, double-click the row to flip it. for a number like the TLS version below, double-click, type the new value, and hit the checkmark to save.</p>
+<p> <strong>*********about:config settings start*********</strong> </p>
+<p><strong>Disable WebRTC:</strong></p>
+<p>WebRTC can leak your real IP even behind a VPN or Tor.</p>
+<p>media.peerconnection.enabled = <strong>false</strong></p>
+<p><strong>Enable fingerprinting resistance:</strong></p>
+<p>this alone covers most of what a canvas-blocking extension would do, without adding another extension to fingerprint against.</p>
+<p>privacy.resistfingerprinting = <strong>true</strong></p>
+<p><strong>3DES cipher:</strong></p>
+<p>3DES has known weaknesses at this point.</p>
+<p>security.ssl3.rsa_des_ede3_sha = <strong>false</strong></p>
+<p><strong>Require secure renegotiation:</strong></p>
+<p>security.ssl.require_safe_negotiation = <strong>true</strong></p>
+<p><strong>Disable TLS 1.0, 1.1:</strong></p>
+<p>security.tls.version.min = 3</p>
+<p><strong>Enable TLS 1.3:</strong></p>
+<p>security.tls.version.max = 4</p>
+<p><strong>Disable TLS 0-RTT for better forward secrecy:</strong></p>
+<p>security.tls.enable_0rtt_data = <strong>false</strong></p>
+<p><strong>Disable form autofill:</strong></p>
+<p>browser.formfill.enable = <strong>false</strong></p>
+<p><strong>Disable disk cache:</strong></p>
+<p>this one has a real cost — pages reload slower, sites feel heavier. only worth it if your threat model includes someone getting physical access to the machine and pulling cached data off disk.</p>
+<p>browser.cache.disk.enable = <strong>false</strong></p>
+<p>browser.cache.disk_cache_ssl = <strong>false</strong></p>
+<p>browser.cache.offline.enable = <strong>false</strong></p>
+<p><strong>Disable geolocation:</strong></p>
+<p>geo.enabled = <strong>false</strong></p>
+<p><strong>Disable telemetry:</strong></p>
+<p>toolkit.telemetry.unified = <strong>false</strong></p>
+<p>toolkit.telemetry.archive.enabled = <strong>false</strong></p>
+<p>toolkit.telemetry.shutdownpingsender.enabled = <strong>false</strong></p>
+<p>datareporting.healthreport.uploadEnabled = <strong>false</strong></p>
+<p><strong>Disable WebGL:</strong></p>
+<p>gives pages fairly direct access to the GPU, and it’s one of the richer fingerprinting surfaces out there. cost: some sites and canvas-based content just won’t render.</p>
+<p>webgl.disabled = <strong>true</strong></p>
+<p><strong>A note on cross-site tracking isolation:</strong></p>
+<p>older versions of this list pointed at <code>privacy.firstparty.isolate</code>. current Firefox handles this through State Partitioning by default, so that pref is mostly a no-op now — check about:config for it before relying on it, prefs get renamed or absorbed between releases.</p>
+<p><strong>Disable false start on TLS:</strong></p>
+<p>security.ssl.enable_false_start = <strong>false</strong></p>
+<p><strong>Disable script execution by default:</strong></p>
+<p>this is the one to think twice about. blocking scripts globally breaks most of the modern web, not just trackers. it’s an extreme-threat-model setting, not a daily-driver one — most people are better served by NoScript or uBlock Origin in a less aggressive mode.</p>
+<p>security.default_content_setting_for_scripts = <strong>false</strong></p>
+<p><strong>*********about:config settings end*********</strong></p>
+</article></main><footer>Acervo técnico do Gentoober. Datas originais preservadas.</footer></body></html>
